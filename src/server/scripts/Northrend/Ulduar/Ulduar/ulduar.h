@@ -395,7 +395,13 @@ enum UlduarAchievementCriteriaIds
     CRITERIA_C_O_U_FREYA_25                  = 10583,
     CRITERIA_C_O_U_MIMIRON_25                = 10361,
     CRITERIA_C_O_U_VEZAX_25                  = 10362,
-    CRITERIA_C_O_U_YOGG_SARON_25             = 10364
+    CRITERIA_C_O_U_YOGG_SARON_25             = 10364,
+
+    // Hodir
+    CRITERIA_RARE_CACHE_10                   = 10452,
+    CRITERIA_RARE_CACHE_25                   = 10458,
+    CRITERIA_GETTING_COLD_10                 = 10247,
+    CRITERIA_GETTING_COLD_25                 = 10248
 };
 
 enum UlduarData
@@ -421,6 +427,7 @@ enum UlduarData
 
     // Hodir
     DATA_HODIR_RARE_CACHE,
+    DATA_HODIR_GETTING_COLD_IN_HERE,
 
     // Mimiron
     DATA_LEVIATHAN_MK_II,

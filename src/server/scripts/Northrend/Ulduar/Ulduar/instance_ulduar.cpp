@@ -182,6 +182,7 @@ class instance_ulduar : public InstanceMapScript
                 IsDriveMeCrazyEligible = true;
                 _algalonSummoned = false;
                 _summonAlgalon = false;
+                gettingColdInHere = false;
                 _CoUAchivePlayerDeathMask = 0;
 
                 memset(_summonObservationRingKeeper, 0, sizeof(_summonObservationRingKeeper));
@@ -223,6 +224,7 @@ class instance_ulduar : public InstanceMapScript
             bool lumberjacked;
             bool Unbroken;
             bool IsDriveMeCrazyEligible;
+            bool gettingColdInHere;
 
             void FillInitialWorldStates(WorldPackets::WorldState::InitWorldStates& packet) override
             {
@@ -486,6 +488,8 @@ class instance_ulduar : public InstanceMapScript
                     case GO_HODIR_RARE_CACHE_OF_WINTER_HERO:
                     case GO_HODIR_RARE_CACHE_OF_WINTER:
                         HodirRareCacheGUID = gameObject->GetGUID();
+                        gameObject->SetFlag(GO_FLAG_NOT_SELECTABLE);
+                        gameObject->SetRespawnTime(gameObject->GetRespawnDelay());
                         break;
                     case GO_HODIR_CHEST_HERO:
                     case GO_HODIR_CHEST:
@@ -656,7 +660,13 @@ class instance_ulduar : public InstanceMapScript
                         {
                             if (GameObject* HodirRareCache = instance->GetGameObject(HodirRareCacheGUID))
                                 if (GetData(DATA_HODIR_RARE_CACHE))
+                                {
                                     HodirRareCache->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
+                                }
+                                else
+                                {
+                                    HodirRareCache->DespawnOrUnsummon();
+                                }
                             if (GameObject* HodirChest = instance->GetGameObject(HodirChestGUID))
                                 HodirChest->SetRespawnTime(HodirChest->GetRespawnDelay());
 
@@ -753,8 +763,14 @@ class instance_ulduar : public InstanceMapScript
                         {
                             if (Creature* hodir = GetCreature(DATA_HODIR))
                                 if (GameObject* gameObject = instance->GetGameObject(HodirRareCacheGUID))
+                                {
                                     hodir->RemoveGameObject(gameObject, false);
+                                    gameObject->DespawnOrUnsummon();
+                                }
                         }
+                        break;
+                    case DATA_HODIR_GETTING_COLD_IN_HERE:
+                        gettingColdInHere = data;
                         break;
                     case DATA_UNBROKEN:
                         Unbroken = data != 0;
@@ -930,6 +946,12 @@ class instance_ulduar : public InstanceMapScript
                     case CRITERIA_C_O_U_YOGG_SARON_10:
                     case CRITERIA_C_O_U_YOGG_SARON_25:
                         return (_CoUAchivePlayerDeathMask & (1 << DATA_YOGG_SARON)) == 0;
+                    case CRITERIA_RARE_CACHE_10:
+                    case CRITERIA_RARE_CACHE_25:
+                        return HodirRareCacheData;
+                    case CRITERIA_GETTING_COLD_10:
+                    case CRITERIA_GETTING_COLD_25:
+                        return gettingColdInHere;
                 }
 
                 return false;

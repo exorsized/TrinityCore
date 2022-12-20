@@ -99,6 +99,7 @@ enum HodirNPC
     NPC_SNOWPACKED_ICICLE                        = 33174,
     NPC_ICICLE                                   = 33169,
     NPC_ICICLE_SNOWDRIFT                         = 33173,
+    NPC_INVISIBLE_STALKER                        = 30298,
     NPC_TOASTY_FIRE                              = 33342,
 };
 
@@ -188,6 +189,7 @@ class npc_flash_freeze : public CreatureScript
                 instance = me->GetInstanceScript();
                 me->SetDisplayId(me->GetCreatureTemplate()->Modelid2);
                 me->SetUnitFlag(UNIT_FLAG_STUNNED | UNIT_FLAG_PACIFIED);
+                me->RemoveUnitFlag(UNIT_FLAG_UNINTERACTIBLE);
                 me->SetControlled(true, UNIT_STATE_ROOT);
             }
 
@@ -246,6 +248,27 @@ class npc_flash_freeze : public CreatureScript
                     if (target->GetTypeId() == TYPEID_PLAYER)
                         if (Creature* hodir = instance->GetCreature(DATA_HODIR))
                             hodir->AI()->DoAction(ACTION_CHEESE_THE_FREEZE);
+                }
+            }
+
+            void DamageTaken(Unit* who, uint32& /*damage*/, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+            {
+                if (Creature* helper = ObjectAccessor::GetCreature(*me, targetGUID))
+                {
+                    helper->RemoveUnitFlag(UNIT_FLAG_STUNNED | UNIT_FLAG_PACIFIED);
+                    helper->SetControlled(false, UNIT_STATE_ROOT);
+
+                    if (Creature* hodir = instance->GetCreature(DATA_HODIR))
+                    {
+                        if (!hodir->IsInCombat())
+                        {
+                            hodir->SetReactState(REACT_AGGRESSIVE);
+                            hodir->AI()->DoZoneInCombat();
+                            hodir->AI()->AttackStart(who);
+                        }
+
+                        helper->AI()->AttackStart(hodir);
+                    }
                 }
             }
         };
@@ -352,8 +375,17 @@ class boss_hodir : public CreatureScript
             bool iHaveTheCoolestFriends;
             bool iCouldSayThatThisCacheWasRare;
 
+            bool alreadyKilled = false;
+
             void Reset() override
             {
+                if (alreadyKilled) return;
+
+                instance->SetData(DATA_HODIR_GETTING_COLD_IN_HERE, 0);
+
+                CleanupFlashFreeze();
+                CleanupToastyFires();
+
                 Initialize();
 
                 _Reset();
@@ -366,6 +398,10 @@ class boss_hodir : public CreatureScript
 
             void JustEngagedWith(Unit* who) override
             {
+                DoZoneInCombat();
+                AttackStart(who);
+                me->SetReactState(REACT_AGGRESSIVE);
+
                 BossAI::JustEngagedWith(who);
                 Talk(SAY_AGGRO);
                 DoCast(me, SPELL_BITING_COLD, true);
@@ -375,12 +411,15 @@ class boss_hodir : public CreatureScript
                 cheeseTheFreeze = true;
                 iHaveTheCoolestFriends = true;
                 iCouldSayThatThisCacheWasRare = true;
+                alreadyKilled = false;
+
+                instance->SetData(DATA_HODIR_GETTING_COLD_IN_HERE, 1);
 
                 events.ScheduleEvent(EVENT_ICICLE, 2s);
                 events.ScheduleEvent(EVENT_FREEZE, 25s);
                 events.ScheduleEvent(EVENT_BLOWS, 60s, 65s);
                 events.ScheduleEvent(EVENT_FLASH_FREEZE, 45s);
-                events.ScheduleEvent(EVENT_RARE_CACHE, 3min);
+                events.ScheduleEvent(EVENT_RARE_CACHE, 2min);
                 events.ScheduleEvent(EVENT_BERSERK, 8min);
             }
 
@@ -394,6 +433,8 @@ class boss_hodir : public CreatureScript
             {
                 if (damage >= me->GetHealth())
                 {
+                    alreadyKilled = true;
+
                     damage = 0;
                     Talk(SAY_DEATH);
                     if (iCouldSayThatThisCacheWasRare)
@@ -416,6 +457,9 @@ class boss_hodir : public CreatureScript
                                                         /// spell will target enemies only
                     me->SetFaction(FACTION_FRIENDLY);
                     me->DespawnOrUnsummon(10s);
+
+                    CleanupFlashFreeze();
+                    CleanupToastyFires();
 
                     _JustDied();
                 }
@@ -499,7 +543,10 @@ class boss_hodir : public CreatureScript
                         if (Player* target = pair.second->GetOther(me)->ToPlayer())
                             if (Aura* BitingColdAura = target->GetAura(SPELL_BITING_COLD_TRIGGERED))
                                 if (BitingColdAura->GetStackAmount() > 2)
-                                    SetData(DATA_GETTING_COLD_IN_HERE, 0);
+                                {
+                                    instance->SetData(DATA_HODIR_GETTING_COLD_IN_HERE, 0);
+                                    gettingColdInHere = false;
+                                }
                     gettingColdInHereTimer = 1000;
                 }
                 else
@@ -532,7 +579,10 @@ class boss_hodir : public CreatureScript
                 for (std::list<Unit*>::iterator itr = TargetList.begin(); itr != TargetList.end(); ++itr)
                 {
                     Unit* target = *itr;
-                    if (!target || !target->IsAlive() || GetClosestCreatureWithEntry(target, NPC_SNOWPACKED_ICICLE, 5.0f))
+                    if (!target || !target->IsAlive() || GetClosestCreatureWithEntry(target, NPC_SNOWPACKED_ICICLE, 5.0f)
+                        || target->GetEntry() == NPC_ICICLE || target->GetEntry() == NPC_ICE_BLOCK || target->GetEntry() == NPC_FLASH_FREEZE
+                        || target->GetEntry() == NPC_TOASTY_FIRE || target->GetEntry() == NPC_ICICLE_SNOWDRIFT || target->GetEntry() == NPC_SNOWPACKED_ICICLE
+                        || target->GetEntry() == NPC_INVISIBLE_STALKER)
                         continue;
 
                     if (target->HasAura(SPELL_FLASH_FREEZE_HELPER) || target->HasAura(SPELL_BLOCK_OF_ICE))
@@ -542,6 +592,25 @@ class boss_hodir : public CreatureScript
                     }
 
                     target->CastSpell(target, SPELL_SUMMON_BLOCK_OF_ICE, true);
+                }
+            }
+
+            void CleanupToastyFires()
+            {
+                while (Creature* ToastyFireNPC = me->FindNearestCreature(NPC_TOASTY_FIRE, 100.0f))
+                {
+                    if (GameObject* ToastyFire = ToastyFireNPC->FindNearestGameObject(GO_TOASTY_FIRE, 1.0f))
+                        ToastyFire->Delete();
+
+                    ToastyFireNPC->DespawnOrUnsummon();
+                }
+            }
+
+            void CleanupFlashFreeze()
+            {
+                while (Creature* FlashFreezeNPC = me->FindNearestCreature(NPC_FLASH_FREEZE, 100.0f))
+                {
+                    FlashFreezeNPC->DespawnOrUnsummon();
                 }
             }
         };
@@ -965,10 +1034,11 @@ class npc_toasty_fire : public CreatureScript
 
             void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
             {
-                if (spellInfo->Id == SPELL_BLOCK_OF_ICE || spellInfo->Id == SPELL_ICE_SHARD || spellInfo->Id == SPELL_ICE_SHARD_HIT)
+                if (spellInfo->Id == SPELL_BLOCK_OF_ICE || spellInfo->Id == SPELL_ICE_SHARD || spellInfo->Id == SPELL_ICE_SHARD_HIT
+                    || spellInfo->Id == SPELL_ICICLE || spellInfo->Id == SPELL_ICICLE_FALL || spellInfo->Id == SPELL_FALL_DAMAGE)
                 {
                     if (GameObject* ToastyFire = me->FindNearestGameObject(GO_TOASTY_FIRE, 1.0f))
-                        me->RemoveGameObject(ToastyFire, true);
+                        ToastyFire->Delete();
                     me->DespawnOrUnsummon();
                 }
             }
